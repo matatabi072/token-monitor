@@ -1,0 +1,15 @@
+/target
+Cargo.lock
+*.rs.bk
+.DS_Store
+Thumbs.db
+
+# 認証情報（絶対にコミットしない）
+config.toml
+*.token
+*.tokens
+
+# アプリのローカルデータ
+settings.json
+window_state.json
+*.backup.json

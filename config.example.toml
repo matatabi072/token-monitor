@@ -1,0 +1,18 @@
+# これを config.toml にコピーして、自分の認証情報を記入してください。
+# config.toml は .gitignore 済み（コミットされません）。秘匿情報の取り扱いに注意。
+
+[claude]
+enabled = true
+# claude.ai の Cookie にある sessionKey の値（sk-ant-sid02-... で始まる文字列）
+session_key = "sk-ant-sid02-XXXXXXXX"
+# usage の URL に含まれる組織 UUID:
+#   https://claude.ai/api/organizations/<ここ>/usage
+org_id = "00000000-0000-0000-0000-000000000000"
+
+[codex]
+enabled = true
+# chatgpt.com のセッションで発行される Bearer アクセストークン。
+# 取得法(暫定): ログイン中に DevTools コンソールで
+#   await fetch('/api/auth/session').then(r=>r.json()).then(j=>j.accessToken)
+# を実行してコピー。※短命なので v2 でセッションCookieから自動更新にする予定。
+access_token = "eyJ..."
