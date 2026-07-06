@@ -25,6 +25,10 @@ const THEME_LIGHT: u8 = 2;
 const LANG_JP: u8 = 0;
 const LANG_EN: u8 = 1;
 
+// 設定ウィンドウのサイズ（開く位置の画面内クランプ計算にも使う）
+const SETTINGS_W: f32 = 340.0;
+const SETTINGS_H: f32 = 440.0;
+
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -529,11 +533,26 @@ impl eframe::App for TokenApp {
                 }
                 if ui.button("⚙ 設定").clicked() {
                     self.settings_open = true;
-                    // メインウィンドウの右隣に開く（開くたびに現在位置へ追従）
-                    self.settings_pos = ui
-                        .ctx()
-                        .input(|i| i.viewport().outer_rect)
-                        .map(|r| egui::pos2(r.max.x + 8.0, r.min.y));
+                    // メインウィンドウの右隣に開く（開くたびに現在位置へ追従）。
+                    // 画面端でオフスクリーンになると開いたのに見えない事故になるため、
+                    // モニタ範囲が取れる場合は右→左優先で画面内にクランプする。
+                    self.settings_pos = ui.ctx().input(|i| {
+                        let vp = i.viewport();
+                        let outer = vp.outer_rect?;
+                        let mut x = outer.max.x + 8.0;
+                        let mut y = outer.min.y;
+                        if let Some(mon) = vp.monitor_size {
+                            if mon.x > 1.0 && mon.y > 1.0 {
+                                if x + SETTINGS_W > mon.x {
+                                    // 右に収まらないなら左隣に開く
+                                    x = outer.min.x - SETTINGS_W - 8.0;
+                                }
+                                x = x.clamp(0.0, (mon.x - SETTINGS_W).max(0.0));
+                                y = y.clamp(0.0, (mon.y - SETTINGS_H).max(0.0));
+                            }
+                        }
+                        Some(egui::pos2(x, y))
+                    });
                 }
             });
 
@@ -554,7 +573,7 @@ impl eframe::App for TokenApp {
             let mut close = false;
             let mut builder = egui::ViewportBuilder::default()
                 .with_title("Token Monitor 設定")
-                .with_inner_size([340.0, 440.0])
+                .with_inner_size([SETTINGS_W, SETTINGS_H])
                 .with_decorations(false) // メイン同様、独自タイトルバーでテーマ追従
                 .with_resizable(true);
             if let Some(p) = self.settings_pos {
