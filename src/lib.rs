@@ -73,6 +73,14 @@ pub struct Credit {
     /// 使用率％（バー描画用）。無い場合(残高ベース等)は None
     pub percent: Option<f64>,
     pub detail: String,
+    /// 追加クレジットの使用額（ドル）
+    pub used_dollars: Option<f64>,
+    /// 追加クレジットの月間上限額（ドル）
+    pub limit_dollars: Option<f64>,
+    /// 残高（上限-使用額、ドル）
+    pub remaining_dollars: Option<f64>,
+    /// 次回リセット日時（APIに直接の値が無いため、翌月1日 00:00 UTCとして算出）
+    pub resets_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Clone)]
@@ -144,6 +152,35 @@ struct ClaudeSpend {
     enabled: bool,
     #[serde(default)]
     can_purchase_credits: bool,
+    used: Option<ClaudeMoney>,
+    limit: Option<ClaudeMoney>,
+}
+
+/// spend.used / spend.limit の金額表現（{amount_minor, exponent} の最小単位表記）
+#[derive(Deserialize)]
+struct ClaudeMoney {
+    amount_minor: i64,
+    #[serde(default)]
+    exponent: i32,
+}
+
+impl ClaudeMoney {
+    fn dollars(&self) -> f64 {
+        self.amount_minor as f64 / 10f64.powi(self.exponent)
+    }
+}
+
+/// 翌月1日 00:00 UTC を返す（Claude追加クレジットは月次リセットだが、
+/// usage APIのレスポンスにはリセット日時が含まれないため計算で求める）
+fn next_month_first_utc() -> DateTime<Utc> {
+    use chrono::{Datelike, TimeZone};
+    let now = Utc::now();
+    let (y, m) = if now.month() == 12 {
+        (now.year() + 1, 1)
+    } else {
+        (now.year(), now.month() + 1)
+    };
+    Utc.with_ymd_and_hms(y, m, 1, 0, 0, 0).unwrap()
 }
 
 // ───────────────────────── Codex JSON ─────────────────────────
@@ -252,16 +289,39 @@ pub fn fetch_claude(client: &reqwest::blocking::Client, cfg: &ClaudeCfg) -> Resu
         });
     }
 
-    let credit = u.spend.map(|s| Credit {
-        enabled: s.enabled,
-        percent: Some(s.percent),
-        detail: if s.enabled {
-            format!("{}% 使用", s.percent)
+    let credit = u.spend.map(|s| {
+        let used_dollars = s.used.as_ref().map(|m| m.dollars());
+        let limit_dollars = s.limit.as_ref().map(|m| m.dollars());
+        let remaining_dollars = match (limit_dollars, used_dollars) {
+            (Some(l), Some(u)) => Some((l - u).max(0.0)),
+            _ => None,
+        };
+        let resets_at = if s.enabled && limit_dollars.is_some() {
+            Some(next_month_first_utc())
+        } else {
+            None
+        };
+        let detail = if s.enabled {
+            match (used_dollars, limit_dollars, remaining_dollars) {
+                (Some(u), Some(l), Some(r)) => {
+                    format!("${u:.2} 使用 / 残高 ${r:.2}（上限 ${l:.2}）")
+                }
+                _ => format!("{}% 使用", s.percent),
+            }
         } else if s.can_purchase_credits {
             "OFF（購入可）".to_string()
         } else {
             "OFF".to_string()
-        },
+        };
+        Credit {
+            enabled: s.enabled,
+            percent: Some(s.percent),
+            detail,
+            used_dollars,
+            limit_dollars,
+            remaining_dollars,
+            resets_at,
+        }
     });
 
     Ok(ServiceUsage {
@@ -385,6 +445,10 @@ pub fn fetch_codex(client: &reqwest::blocking::Client, cfg: &CodexCfg) -> Result
                 }
             }
         },
+        used_dollars: None,
+        limit_dollars: None,
+        remaining_dollars: c.balance,
+        resets_at: None,
     });
 
     Ok(ServiceUsage {

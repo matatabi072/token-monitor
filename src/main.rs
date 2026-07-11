@@ -3,7 +3,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // release時はコンソール窓を出さない
 
-use chrono::Utc;
+use chrono::{Datelike, Utc};
 use eframe::egui;
 use notify_rust::Notification;
 use std::collections::HashSet;
@@ -286,6 +286,18 @@ fn join_i(v: &[i64]) -> String {
 }
 
 /// リセットまでの残り時間を表示言語に合わせて整形
+/// リセット日を短い日付表記に（JP: "8/1", EN: "Aug 1"）
+fn fmt_reset_date(t: chrono::DateTime<Utc>, jp: bool) -> String {
+    if jp {
+        format!("{}/{}", t.month(), t.day())
+    } else {
+        const MONTHS: [&str; 12] = [
+            "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+        ];
+        format!("{} {}", MONTHS[t.month0() as usize], t.day())
+    }
+}
+
 fn fmt_remaining(resets_at: Option<chrono::DateTime<Utc>>, jp: bool) -> String {
     let Some(t) = resets_at else {
         return "---".into();
@@ -490,20 +502,56 @@ impl eframe::App for TokenApp {
                         }
                         if self.show_credit {
                             if let Some(c) = &u.credit {
+                                let jp = self.lang == LANG_JP;
                                 let credit_color = egui::Color32::from_rgb(210, 170, 70); // アンバー
-                                // ラベル行（Credit + 値）… 常に表示
+                                // ラベル行（Credit + 使用額）… 常に表示
                                 ui.horizontal(|ui| {
                                     ui.label(self.credit_label());
                                     ui.with_layout(
                                         egui::Layout::right_to_left(egui::Align::Center),
                                         |ui| {
-                                            ui.label(&c.detail);
+                                            if let Some(u) = c.used_dollars {
+                                                ui.label(format!(
+                                                    "{} ${u:.2}",
+                                                    if jp { "使用" } else { "used" }
+                                                ));
+                                            } else {
+                                                ui.label(&c.detail);
+                                            }
                                         },
                                     );
                                 });
                                 // バー … ％がある場合は併せて表示（両方出す）
                                 if let Some(p) = c.percent {
                                     draw_bar(ui, (p / 100.0).clamp(0.0, 1.0) as f32, credit_color);
+                                }
+                                // 残高・リセット日（小さめの補足行）
+                                if c.remaining_dollars.is_some() || c.resets_at.is_some() {
+                                    ui.horizontal(|ui| {
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                let mut parts = Vec::new();
+                                                if let Some(r) = c.remaining_dollars {
+                                                    parts.push(format!(
+                                                        "{} ${r:.2}",
+                                                        if jp { "残高" } else { "balance" }
+                                                    ));
+                                                }
+                                                if let (Some(t), Some(l)) =
+                                                    (c.resets_at, c.limit_dollars)
+                                                {
+                                                    let d = fmt_reset_date(t, jp);
+                                                    parts.push(if jp {
+                                                        format!("{d}にリセット ${l:.2}")
+                                                    } else {
+                                                        format!("resets {d} ${l:.2}")
+                                                    });
+                                                }
+                                                ui.small(parts.join("  ・  "));
+                                            },
+                                        );
+                                    });
                                 }
                             }
                         }
